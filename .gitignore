@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Secrets / session (Service Desk cookie state lives in connectors/)
+.env
+.env.*
+!.env.example
+*_state.json
+*.token.json
+credentials.json
+
+# Runtime logs / local restarts
+*.log
+_restart_*.log
+backend/_server*.log
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~
+
+# Local caches / dumps
+.cache/
+tmp/
+temp/
+*.sqlite
+*.db
