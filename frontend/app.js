@@ -1561,6 +1561,7 @@ function WeeklyChartsBlock({ start, end, refreshTick, active, meta }) {
   const [panelFilter, setPanelFilter] = useState("");
   const [panelCxFilter, setPanelCxFilter] = useState(""); // "" = all
   const [excludedOpen, setExcludedOpen] = useState(false);
+  const [hideSwUpdates, setHideSwUpdates] = useState(false);
 
   const fleetCanvasRef = useRef(null);
   const fleetChartRef = useRef(null);
@@ -1583,6 +1584,30 @@ function WeeklyChartsBlock({ start, end, refreshTick, active, meta }) {
   const weekIds = useMemo(() => weeks.map((w) => w.id), [weeks]);
   const nActive = data?.fleet?.n_active || [];
   const fundHours = data?.fleet?.fund_hours || [];
+
+  const cxColorIndex = useMemo(() => {
+    const map = {};
+    (data?.complexes || []).forEach((c, i) => { map[c.complex] = i; });
+    return map;
+  }, [data]);
+
+  const isOutOfCalc = useCallback((t) => {
+    if (!t) return true;
+    if (excludedIds.has(t.id)) return true;
+    if (hideSwUpdates && t.is_sw_update) return true;
+    return false;
+  }, [excludedIds, hideSwUpdates]);
+
+  const swTicketCount = useMemo(() => {
+    if (!data?.week_tickets) return 0;
+    const seen = new Set();
+    for (const list of Object.values(data.week_tickets)) {
+      for (const t of list || []) {
+        if (t.is_sw_update) seen.add(t.id);
+      }
+    }
+    return seen.size;
+  }, [data]);
 
   const openWeekAt = useCallback((weekIndex) => {
     if (!data?.weeks?.[weekIndex]) return;
@@ -1633,6 +1658,7 @@ function WeeklyChartsBlock({ start, end, refreshTick, active, meta }) {
       const tickets = (data.week_tickets && data.week_tickets[wid]) || [];
       for (const t of tickets) {
         if (excludedIds.has(t.id)) continue;
+        if (hideSwUpdates && t.is_sw_update) continue;
         const hbc = t.hours_by_complex || {};
         let added = 0;
         for (const [cx, hrs] of Object.entries(hbc)) {
@@ -1660,7 +1686,7 @@ function WeeklyChartsBlock({ start, end, refreshTick, active, meta }) {
       hours: (hoursByCx[c.complex] || Array(n).fill(0)).map((h) => Math.round(h * 100) / 100),
     }));
     return { hoursTotal: hoursTotalR, hoursPerActive, complexes };
-  }, [data, weeks, weekIds, nActive, excludedIds]);
+  }, [data, weeks, weekIds, nActive, excludedIds, hideSwUpdates]);
 
   // Fleet chart
   useEffect(() => {
@@ -1882,7 +1908,9 @@ function WeeklyChartsBlock({ start, end, refreshTick, active, meta }) {
     const groups = [...byCx.entries()].map(([cx, tickets]) => ({
       cx,
       tickets,
+      activeCount: tickets.filter((t) => !isOutOfCalc(t)).length,
       hours: tickets.reduce((s, t) => {
+        if (isOutOfCalc(t)) return s;
         const hbc = t.hours_by_complex || {};
         if (hbc[cx] != null) return s + hbc[cx];
         return s + (t.week_hours ?? t.downtime_hours ?? 0);
@@ -1890,11 +1918,16 @@ function WeeklyChartsBlock({ start, end, refreshTick, active, meta }) {
     }));
     groups.sort((a, b) => b.hours - a.hours || a.cx.localeCompare(b.cx, undefined, { numeric: true }));
     return groups;
-  }, [panelTicketsRaw, panelFilter, panelCxFilter, panelSort]);
+  }, [panelTicketsRaw, panelFilter, panelCxFilter, panelSort, isOutOfCalc]);
 
   const panelActiveCount = useMemo(
-    () => panelTicketsRaw.filter((t) => !excludedIds.has(t.id)).length,
-    [panelTicketsRaw, excludedIds]
+    () => panelTicketsRaw.filter((t) => !isOutOfCalc(t)).length,
+    [panelTicketsRaw, isOutOfCalc]
+  );
+
+  const panelSwCount = useMemo(
+    () => panelTicketsRaw.filter((t) => t.is_sw_update).length,
+    [panelTicketsRaw]
   );
 
   const excludedList = useMemo(() => {
@@ -1916,9 +1949,17 @@ function WeeklyChartsBlock({ start, end, refreshTick, active, meta }) {
           <span>Комплексов: <strong>${computed.complexes.length}</strong></span>
           <span class="muted">монтаж/ПНР исключён: ${data.excluded_montage_count}</span>
           <span class="muted">даунтайм-заявок: ${data.downtime_ticket_count}</span>
+          <button type="button"
+                  class=${"pill" + (hideSwUpdates ? " active" : "")}
+                  title="Исключить из недельного расчёта все заявки с флагом обновления ПО"
+                  onClick=${() => setHideSwUpdates((v) => !v)}>
+            ${hideSwUpdates
+              ? `Вернуть обновления ПО (${swTicketCount})`
+              : `Без обновлений ПО (${swTicketCount})`}
+          </button>
           ${excludedIds.size > 0 && html`
             <button type="button" class="linkish"
-                    onClick=${() => setExcludedOpen(true)}>исключено из расчёта: ${excludedIds.size}</button>
+                    onClick=${() => setExcludedOpen(true)}>исключено вручную: ${excludedIds.size}</button>
           `}
           <span class="muted">Y флота = сумма / N · клик по неделе — срез заявок</span>
         </div>
@@ -1950,6 +1991,13 @@ function WeeklyChartsBlock({ start, end, refreshTick, active, meta }) {
             <div class="charts-drill-head">
               <strong>${formatWeekPanelTitle(weekPanel.week)}</strong>
               <span class="muted">${panelActiveCount} из ${panelTicketsRaw.length} заявок · ${panelGroups.length} комплексов</span>
+              ${panelSwCount > 0 && html`
+                <button type="button" class=${"pill" + (hideSwUpdates ? " active" : "")}
+                        style=${{ padding: "2px 8px", fontSize: "11px" }}
+                        onClick=${() => setHideSwUpdates((v) => !v)}>
+                  ${hideSwUpdates ? `ПО: вернуть (${panelSwCount})` : `ПО: убрать (${panelSwCount})`}
+                </button>
+              `}
               <button class="btn secondary" style=${{ padding: "2px 8px", marginLeft: "auto" }}
                       onClick=${() => setWeekPanel(null)}>Закрыть</button>
             </div>
@@ -1975,14 +2023,23 @@ function WeeklyChartsBlock({ start, end, refreshTick, active, meta }) {
             <div class="charts-drill-list weekly-panel-groups">
               ${panelGroups.length === 0
                 ? html`<div class="muted">Нет заявок по фильтру</div>`
-                : panelGroups.map((g) => html`
-                  <div key=${g.cx} class="weekly-cx-group">
-                    <div class="weekly-cx-group-head">
+                : panelGroups.map((g) => {
+                  const cidx = cxColorIndex[g.cx] ?? 0;
+                  const lineColor = complexColor(cidx, 1);
+                  const tintBg = complexColor(cidx, 0.28);
+                  const headBg = complexColor(cidx, 0.42);
+                  return html`
+                  <div key=${g.cx} class="weekly-cx-group"
+                       style=${{ "--cx-line": lineColor, background: tintBg, borderLeftColor: lineColor }}>
+                    <div class="weekly-cx-group-head" style=${{ background: headBg }}>
+                      <span class="weekly-cx-swatch" style=${{ background: lineColor }}></span>
                       <strong>${g.cx}</strong>
                       <span class="muted">${g.tickets.length} заявок · ${g.hours.toFixed(2)} ч</span>
                     </div>
                     ${g.tickets.map((p) => {
-                      const isEx = excludedIds.has(p.id);
+                      const manualEx = excludedIds.has(p.id);
+                      const swEx = hideSwUpdates && p.is_sw_update;
+                      const isEx = manualEx || swEx;
                       const hrs = (p.hours_by_complex && p.hours_by_complex[g.cx] != null)
                         ? p.hours_by_complex[g.cx]
                         : (p.week_hours ?? p.downtime_hours);
@@ -1991,25 +2048,28 @@ function WeeklyChartsBlock({ start, end, refreshTick, active, meta }) {
                              class=${"charts-drill-item charts-drill-item-actions" + (isEx ? " excluded" : "")}>
                           <button type="button" class="linkish charts-drill-code"
                                   onClick=${() => openTicketFromPanel(
-                                    panelTicketsRaw.filter((x) => !excludedIds.has(x.id) || x.id === p.id),
+                                    panelTicketsRaw.filter((x) => !isOutOfCalc(x) || x.id === p.id),
                                     p.id
                                   )}>${p.code}</button>
                           <button type="button" class="linkish charts-drill-title"
                                   onClick=${() => openTicketFromPanel(
-                                    panelTicketsRaw.filter((x) => !excludedIds.has(x.id) || x.id === p.id),
+                                    panelTicketsRaw.filter((x) => !isOutOfCalc(x) || x.id === p.id),
                                     p.id
                                   )}>${p.title || "—"}</button>
-                          <span class="muted">простой ${hrs != null ? hrs : "—"} ч</span>
-                          ${isEx
+                          <span class="muted">простой ${hrs != null ? hrs : "—"} ч${p.is_sw_update ? " · ПО" : ""}</span>
+                          ${manualEx
                             ? html`<button class="btn secondary" style=${{ padding: "2px 8px", fontSize: "11px" }}
                                            onClick=${() => restoreTicket(p.id)}>Вернуть</button>`
-                            : html`<button class="btn secondary" style=${{ padding: "2px 8px", fontSize: "11px" }}
+                            : swEx
+                              ? html`<span class="muted" style=${{ fontSize: "11px" }}>пресет ПО</span>`
+                              : html`<button class="btn secondary" style=${{ padding: "2px 8px", fontSize: "11px" }}
                                            onClick=${() => excludeTicket(p)}>Исключить</button>`}
                         </div>
                       `;
                     })}
                   </div>
-                `)}
+                `;
+                })}
             </div>
           </div>
         `}
