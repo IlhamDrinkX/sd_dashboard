@@ -2034,7 +2034,7 @@ function WeeklyChartsBlock({ start, end, refreshTick, active, meta }) {
                     <div class="weekly-cx-group-head" style=${{ background: headBg }}>
                       <span class="weekly-cx-swatch" style=${{ background: lineColor }}></span>
                       <strong>${g.cx}</strong>
-                      <span class="muted">${g.tickets.length} заявок · ${g.hours.toFixed(2)} ч</span>
+                      <span class="muted">${g.activeCount}/${g.tickets.length} в расчёте · ${g.hours.toFixed(2)} ч</span>
                     </div>
                     ${g.tickets.map((p) => {
                       const manualEx = excludedIds.has(p.id);
